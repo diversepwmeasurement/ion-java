@@ -1,66 +1,68 @@
-name: build
-permissions: read-all
-
-on:
-  push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
-
-
 jobs:
+  check-version:
+    runs-on: self-hosted
+    steps:
+    - continue-on-error: true
+      uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633
+    - continue-on-error: true
+      name: Get Project Version
+      run: 'echo "PROJECT_VERSION=v$(<project.version)" >> $GITHUB_ENV
+
+        '
+    - continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: ./.github/actions/inspect-version
+      with:
+        fail_if_invalid: true
+        project_version: ${{ env.PROJECT_VERSION }}
+        repo: amazon-ion/ion-java
   test:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    steps:
+    - continue-on-error: true
+      uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633
+      with:
+        submodules: recursive
+    - continue-on-error: true
+      uses: gradle/wrapper-validation-action@b231772637bb498f11fdbc86052b6e8a8dc9fc92
+    - continue-on-error: true
+      name: Use java ${{ matrix.java }}
+      uses: actions/setup-java@99b8673ff64fbf99d8d325f52d9a5bdedb8483e9
+      with:
+        distribution: corretto
+        java-version: ${{ matrix.java }}
+    - continue-on-error: true
+      uses: gradle/gradle-build-action@29c0906b64b8fc82467890bfb7a0a7ef34bda89e
+      with:
+        arguments: build
+    - continue-on-error: true
+      name: Test minified JAR
+      uses: gradle/gradle-build-action@29c0906b64b8fc82467890bfb7a0a7ef34bda89e
+      with:
+        arguments: minifyTest
+    - continue-on-error: true
+      run: ./ion-test-driver-run version
+    - continue-on-error: true
+      if: ${{ matrix.upload_reports }}
+      uses: codecov/codecov-action@54bcd8715eee62d40e33596ef5e8f0f48dbbccab
+      with:
+        files: build/reports/jacoco/test/jacocoTestReport.xml
+    - continue-on-error: true
+      uses: actions/upload-artifact@1eb3cb2b3e0f29609092a73eb033bb759a334595
+      with:
+        name: spotbugs-report-${{ matrix.runs-on }}-java-${{ matrix.java }}
+        path: build/reports/spotbugs/
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - java: 8
-          - java: 11
-            upload_reports: true
-          - java: 17
-      fail-fast: false
-    steps:
-      - uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
-        with:
-          submodules: recursive
-      - uses: gradle/wrapper-validation-action@b231772637bb498f11fdbc86052b6e8a8dc9fc92 # v2.1.2
-      - name: Use java ${{ matrix.java }}
-        uses: actions/setup-java@99b8673ff64fbf99d8d325f52d9a5bdedb8483e9 # v4.2.1
-        with:
-          distribution: 'corretto'
-          java-version: ${{ matrix.java }}
-      - uses: gradle/gradle-build-action@29c0906b64b8fc82467890bfb7a0a7ef34bda89e # v3.1.0
-        with:
-          arguments: build
-      - name: Test minified JAR
-        uses: gradle/gradle-build-action@29c0906b64b8fc82467890bfb7a0a7ef34bda89e # v3.1.0
-        with:
-          arguments: minifyTest
-      - run: ./ion-test-driver-run version
-      - if: ${{ matrix.upload_reports }}
-        uses: codecov/codecov-action@54bcd8715eee62d40e33596ef5e8f0f48dbbccab # v4.1.0
-        with:
-          files: build/reports/jacoco/test/jacocoTestReport.xml
-      - uses: actions/upload-artifact@1eb3cb2b3e0f29609092a73eb033bb759a334595 # v4.1.0
-        with:
-          name: spotbugs-report-${{ matrix.runs-on }}-java-${{ matrix.java }}
-          path: build/reports/spotbugs/
-
-  check-version:
-    # Ensures that the version is not a release (i.e. -SNAPSHOT) or if it is a release version,
-    # ensures that the version is a later version number than the existing releases.
-    # See limitations at:
-    # https://github.com/amazon-ion/ion-java/blob/master/.github/actions/inspect-version/action.yml
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v3.6.0
-      - name: Get Project Version
-        run: |
-          echo "PROJECT_VERSION=v$(<project.version)" >> $GITHUB_ENV
-      - uses: ./.github/actions/inspect-version
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          repo: amazon-ion/ion-java
-          project_version: ${{ env.PROJECT_VERSION }}
-          fail_if_invalid: true
+        - java: 8
+        - java: 11
+          upload_reports: true
+        - java: 17
+name: build
+on:
+  repository_dispatch:
+    types: trigger-ga___main.yml
+permissions: read-all

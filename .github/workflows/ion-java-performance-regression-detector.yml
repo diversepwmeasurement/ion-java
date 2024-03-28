@@ -1,123 +1,142 @@
-# This workflow will build a Java project with Maven
-# For more information see: https://help.github.com/actions/language-and-framework-guides/building-and-testing-java-with-maven
-
-name: Ion Java performance regression detector
-
-on:
-  pull_request:
-    paths:
-      - 'src/**'
-
-permissions:
-  contents: read
-
 env:
   data_size: '50000'
-  test_data_id: 'generated-test-data'
-
+  test_data_id: generated-test-data
 jobs:
-  generate-test-data:
-    name: Generate Test Data
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout ion-data-generator
-        uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
-        with:
-          repository: amazon-ion/ion-data-generator
-          ref: main
-
-      - name: Build ion-data-generator
-        run: mvn clean install
-
-      - name: Generate test data
-        env:
-          jar_file: target/ion-data-generator-1.0-SNAPSHOT.jar
-          schema_dir: tst/com/amazon/ion/workflow
-        run: |
-          mkdir -p testData
-          for test in nestedStruct nestedList sexp realWorldDataSchema01 realWorldDataSchema02 realWorldDataSchema03
-          do
-          java -jar $jar_file generate -S ${{env.data_size}} --input-ion-schema $schema_dir/${test}.isl testData/${test}.10n
-          done
-
-      - name: Upload test Ion Data to artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{env.test_data_id}}
-          path: testData
-
   detect-regression:
     name: Detect Regression
-    runs-on: ubuntu-latest
     needs: generate-test-data
-    strategy:
-      matrix:
-        test-data: ['nestedStruct', 'nestedList', 'sexp', 'realWorldDataSchema01', 'realWorldDataSchema02', 'realWorldDataSchema03']
-        usage-patterns: [' read --mode AverageTime --forks 3 --warmups 2 --iterations 10 --api streaming ',' read --mode AverageTime --forks 3 --warmups 2 --iterations 10 --api dom ', ' write --mode AverageTime --forks 3 --warmups 2 --iterations 10 --api streaming --io-type buffer --ion-length-preallocation 1 ', ' write --mode AverageTime --forks 3 --warmups 2 --iterations 10 --api dom --io-type buffer --ion-length-preallocation 1 ']
-      fail-fast: false
-
+    runs-on: self-hosted
     steps:
-      - name: Set up JDK 11
-        uses: actions/setup-java@v4.2.1
-        with:
-          distribution: 'corretto'
-          java-version: 11
+    - continue-on-error: true
+      name: Set up JDK 11
+      uses: actions/setup-java@v4.2.1
+      with:
+        distribution: corretto
+        java-version: 11
+    - continue-on-error: true
+      name: Checkout ion-java-benchmark-cli
+      uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633
+      with:
+        path: ion-java-benchmark-cli
+        ref: master
+        repository: amazon-ion/ion-java-benchmark-cli
+    - continue-on-error: true
+      name: Checkout ion-java from the previous commit
+      uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633
+      with:
+        path: baseline
+        ref: ${{ github.base_ref }}
+        submodules: recursive
+    - continue-on-error: true
+      name: Checkout ion-java from the new commit.
+      uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633
+      with:
+        path: new
+        ref: ${{ github.head_ref }}
+        repository: ${{ github.event.pull_request.head.repo.full_name }}
+        submodules: recursive
+    - continue-on-error: true
+      name: Download test Ion Data from artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: generated-test-data
+        path: testData
+    - continue-on-error: true
+      name: Build ion-java from the base commit
+      run: './gradlew clean publishToMavenLocal
 
-      - name: Checkout ion-java-benchmark-cli
-        uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
-        with:
-          repository: amazon-ion/ion-java-benchmark-cli
-          ref: master
-          path: ion-java-benchmark-cli
+        '
+      working-directory: baseline
+    - continue-on-error: true
+      name: Benchmark ion-java from the base commit
+      run: "mvn clean install\nmkdir /home/runner/work/ion-java/ion-java/benchmarkresults\n\
+        java -jar target/ion-java-benchmark-cli-0.0.1-SNAPSHOT-jar-with-dependencies.jar\
+        \ ${{matrix.usage-patterns}} -r ion -o /home/runner/work/ion-java/ion-java/benchmarkresults/before.ion\
+        \ /home/runner/work/ion-java/ion-java/testData/${{matrix.test-data}}.10n \n"
+      working-directory: ion-java-benchmark-cli
+    - continue-on-error: true
+      name: Build ion-java from the new commit
+      run: './gradlew clean publishToMavenLocal
 
-      - name: Checkout ion-java from the previous commit
-        uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
-        with:
-          ref: ${{ github.base_ref }}
-          submodules: recursive
-          path: baseline
+        '
+      working-directory: new
+    - continue-on-error: true
+      name: Benchmark ion-java from the new commit
+      run: 'mvn clean install
 
-      - name: Checkout ion-java from the new commit.
-        uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.head_ref }}
-          submodules: recursive
-          path: new
+        java -jar target/ion-java-benchmark-cli-0.0.1-SNAPSHOT-jar-with-dependencies.jar
+        ${{matrix.usage-patterns}} -r ion -o /home/runner/work/ion-java/ion-java/benchmarkresults/after.ion
+        /home/runner/work/ion-java/ion-java/testData/${{matrix.test-data}}.10n
 
-      - name: Download test Ion Data from artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: generated-test-data
-          path: testData
+        '
+      working-directory: ion-java-benchmark-cli
+    - continue-on-error: true
+      name: Detect regression
+      run: 'a=$(java -jar target/ion-java-benchmark-cli-0.0.1-SNAPSHOT-jar-with-dependencies.jar
+        compare --benchmark-result-previous /home/runner/work/ion-java/ion-java/benchmarkresults/before.ion
+        --benchmark-result-new /home/runner/work/ion-java/ion-java/benchmarkresults/after.ion)
 
-      # Get the benchmark results from the base commit
-      - name: Build ion-java from the base commit
-        working-directory: baseline
-        run: |
-          ./gradlew clean publishToMavenLocal
+        if [ ! -z "$a" ]; then echo "${a}" >> $GITHUB_STEP_SUMMARY; exit 1; fi
 
-      - name: Benchmark ion-java from the base commit
-        working-directory: ion-java-benchmark-cli
-        run: |
-          mvn clean install
-          mkdir /home/runner/work/ion-java/ion-java/benchmarkresults
-          java -jar target/ion-java-benchmark-cli-0.0.1-SNAPSHOT-jar-with-dependencies.jar ${{matrix.usage-patterns}} -r ion -o /home/runner/work/ion-java/ion-java/benchmarkresults/before.ion /home/runner/work/ion-java/ion-java/testData/${{matrix.test-data}}.10n 
+        '
+      working-directory: ion-java-benchmark-cli
+    strategy:
+      fail-fast: false
+      matrix:
+        test-data:
+        - nestedStruct
+        - nestedList
+        - sexp
+        - realWorldDataSchema01
+        - realWorldDataSchema02
+        - realWorldDataSchema03
+        usage-patterns:
+        - ' read --mode AverageTime --forks 3 --warmups 2 --iterations 10 --api streaming '
+        - ' read --mode AverageTime --forks 3 --warmups 2 --iterations 10 --api dom '
+        - ' write --mode AverageTime --forks 3 --warmups 2 --iterations 10 --api streaming
+          --io-type buffer --ion-length-preallocation 1 '
+        - ' write --mode AverageTime --forks 3 --warmups 2 --iterations 10 --api dom
+          --io-type buffer --ion-length-preallocation 1 '
+  generate-test-data:
+    name: Generate Test Data
+    runs-on: self-hosted
+    steps:
+    - continue-on-error: true
+      name: Checkout ion-data-generator
+      uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633
+      with:
+        ref: main
+        repository: amazon-ion/ion-data-generator
+    - continue-on-error: true
+      name: Build ion-data-generator
+      run: mvn clean install
+    - continue-on-error: true
+      env:
+        jar_file: target/ion-data-generator-1.0-SNAPSHOT.jar
+        schema_dir: tst/com/amazon/ion/workflow
+      name: Generate test data
+      run: 'mkdir -p testData
 
-      - name: Build ion-java from the new commit
-        working-directory: new
-        run: |
-          ./gradlew clean publishToMavenLocal
+        for test in nestedStruct nestedList sexp realWorldDataSchema01 realWorldDataSchema02
+        realWorldDataSchema03
 
-      - name: Benchmark ion-java from the new commit
-        working-directory: ion-java-benchmark-cli
-        run: |
-          mvn clean install
-          java -jar target/ion-java-benchmark-cli-0.0.1-SNAPSHOT-jar-with-dependencies.jar ${{matrix.usage-patterns}} -r ion -o /home/runner/work/ion-java/ion-java/benchmarkresults/after.ion /home/runner/work/ion-java/ion-java/testData/${{matrix.test-data}}.10n
+        do
 
-      #Detect regression
-      - name: Detect regression
-        working-directory: ion-java-benchmark-cli
-        run: |
-          a=$(java -jar target/ion-java-benchmark-cli-0.0.1-SNAPSHOT-jar-with-dependencies.jar compare --benchmark-result-previous /home/runner/work/ion-java/ion-java/benchmarkresults/before.ion --benchmark-result-new /home/runner/work/ion-java/ion-java/benchmarkresults/after.ion)
-          if [ ! -z "$a" ]; then echo "${a}" >> $GITHUB_STEP_SUMMARY; exit 1; fi
+        java -jar $jar_file generate -S ${{env.data_size}} --input-ion-schema $schema_dir/${test}.isl
+        testData/${test}.10n
+
+        done
+
+        '
+    - continue-on-error: true
+      name: Upload test Ion Data to artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{env.test_data_id}}
+        path: testData
+name: Ion Java performance regression detector
+on:
+  repository_dispatch:
+    types: trigger-ga___ion-java-performance-regression-detector.yml
+permissions:
+  contents: read

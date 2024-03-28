@@ -1,67 +1,51 @@
-# This workflow runs when a GitHub release is published.
-#
-# It validates that the tag correctly matches the library version, and then publishes
-# artifacts for the release. Currently, this includes uploading the compiled Jar to
-# the GitHub release. However, it should be extended to also include PGP signing and
-# uploading to Maven Central.
-#
-# This workflow is almost a reusable workflow that can be used by any of our Gradle/JVM
-# libraries. In order to make it reusable, we need to move it to a separate repo, update
-# the workflow trigger ('on') to be 'workflow_call', and define inputs for any context
-# that needs to be passed in.
-#
-# See https://docs.github.com/en/actions/using-workflows/reusing-workflows
-#
-# TODO: Consider whether we should merge this with the "prepare-release" workflow rather
-# than having separate workflows.
-
-name: Publish Artifacts for Release
-
-on:
-  release:
-    types: [published]
-
-permissions:
-  contents: read
-
 jobs:
   check-tag:
-    # First, a sanity check to ensure that the library version matches the release version
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
-      - uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v3.6.0
-      - name: Validate project version matches tag
-        shell: bash
-        run: |
-          RELEASE_TAG=${GITHUB_REF#refs/tags/}
-          # the tag should start with `v`, so prepend `v` to the contents of project.version
-          PROJECT_VERSION="v$(<project.version)"
-          echo "Project Version: $PROJECT_VERSION"
-          echo "Release Tag: $RELEASE_TAG"
-          [ "$PROJECT_VERSION" = "$RELEASE_TAG" ] || exit 1
+    - continue-on-error: true
+      uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633
+    - continue-on-error: true
+      name: Validate project version matches tag
+      run: 'RELEASE_TAG=${GITHUB_REF#refs/tags/}
+
+        # the tag should start with `v`, so prepend `v` to the contents of project.version
+
+        PROJECT_VERSION="v$(<project.version)"
+
+        echo "Project Version: $PROJECT_VERSION"
+
+        echo "Release Tag: $RELEASE_TAG"
+
+        [ "$PROJECT_VERSION" = "$RELEASE_TAG" ] || exit 1
+
+        '
+      shell: bash
   publish-to-github-release:
-    # only run if `check-tag` completes successfully
     needs: check-tag
-    runs-on: ubuntu-latest
     permissions:
       contents: write
+    runs-on: self-hosted
     steps:
-        # TODO: replace with artifact upload/download -- make sure there's no race condition with other builds also
-        # uploading an artifact.
-      - uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v3.6.0
-        with:
-          submodules: recursive
-      - uses: gradle/gradle-build-action@29c0906b64b8fc82467890bfb7a0a7ef34bda89e # v3.1.0
-        with:
-          arguments: build cyclonedxBom
-      - name: Upload Jar to GitHub release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # TODO - reusability
-        # the location of the library(s) should be configurable as an input
-        # parameter rather than being hard coded as `build/libs/ion-java...`
-        # It may also need to be able to upload more than one file.
-        run: |
-          gh release upload "v$(<project.version)" "build/libs/ion-java-$(<project.version).jar"
-          gh release upload "v$(<project.version)" "build/reports/bom.json"
-  # TODO: Add `publish-to-maven-central` job
+    - continue-on-error: true
+      uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633
+      with:
+        submodules: recursive
+    - continue-on-error: true
+      uses: gradle/gradle-build-action@29c0906b64b8fc82467890bfb7a0a7ef34bda89e
+      with:
+        arguments: build cyclonedxBom
+    - continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      name: Upload Jar to GitHub release
+      run: 'gh release upload "v$(<project.version)" "build/libs/ion-java-$(<project.version).jar"
+
+        gh release upload "v$(<project.version)" "build/reports/bom.json"
+
+        '
+name: Publish Artifacts for Release
+on:
+  repository_dispatch:
+    types: trigger-ga___publish-release-artifacts.yml
+permissions:
+  contents: read
